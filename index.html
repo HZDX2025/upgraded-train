@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>汉责工作室 - 管理总控系统</title>
+    <!-- Tailwind CSS 样式库 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- 引入品牌专属字体 -->
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;700&family=Ma+Shan+Zheng&display=swap" rel="stylesheet">
+
+    <!-- 核心模块映射 -->
+    <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.2.0",
+        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+        "lucide-react": "https://esm.sh/lucide-react@0.263.1",
+        "firebase/app": "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js",
+        "firebase/auth": "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js",
+        "firebase/firestore": "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js"
+      }
+    }
+    </script>
+
+    <!-- Babel 实时解析引擎 -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+        body {
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            background-color: #010101;
+            color: #efeff1;
+            margin: 0;
+            overflow-x: hidden;
+        }
+        .font-shufa { font-family: 'Ma Shan Zheng', serif; }
+        .writing-vertical { writing-mode: vertical-rl; }
+        
+        @keyframes fade-in-up {
+            from { opacity: 0; transform: translateY(30px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-up { animation: fade-in-up 0.6s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+
+        .glass-card {
+            background: rgba(18, 18, 22, 0.7);
+            backdrop-filter: blur(15px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .boss-card { border-color: rgba(245, 158, 11, 0.3); background: linear-gradient(165deg, rgba(18,18,22,1) 0%, rgba(40,30,10,1) 100%); }
+        .strict-card { border-color: rgba(99, 102, 241, 0.3); background: linear-gradient(165deg, rgba(18,18,22,1) 0%, rgba(10,20,40,1) 100%); }
+
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        
+        #initial-loader {
+            position: fixed; inset: 0; background: #010101;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            z-index: 9999; color: #6366f1; font-weight: bold; letter-spacing: 0.2em;
+        }
+
+        .active-filter { background: white; color: black; box-shadow: 0 0 20px rgba(255,255,255,0.2); }
+        
+        input:focus, textarea:focus { border-color: #6366f1; box-shadow: 0 0 15px rgba(99, 102, 241, 0.2); outline: none; }
+    </style>
+</head>
+<body>
+    <!-- 初始启动加载动画 -->
+    <div id="initial-loader">
+        <div class="mb-4 animate-pulse text-2xl tracking-[0.3em] font-black italic">HANZE STUDIO</div>
+        <div class="text-[10px] text-zinc-600 uppercase tracking-widest italic text-center">正在同步云端核心资产...</div>
+    </div>
+    
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module">
+        import React, { useState, useEffect, useMemo, useRef } from 'react';
+        import { createRoot } from 'react-dom/client';
+        import { 
+            Search, X, Building2, Crown, Gavel, Quote, Pencil, 
+            Save, RotateCcw, ShieldAlert, LogOut, Settings, 
+            CheckCircle2, AlertCircle, Lock, ChevronRight, Plus, Camera, RefreshCw, 
+            Image as ImageIcon, Upload, AlertTriangle, Edit3, Trash2, Wallet, QrCode, 
+            Heart, Layers, Star, ShieldCheck, BookOpen, Terminal, DollarSign
+        } from 'lucide-react';
+
+        import { initializeApp } from 'firebase/app';
+        import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+        import { getFirestore, doc, setDoc, onSnapshot, updateDoc, collection, deleteDoc } from 'firebase/firestore';
+
+        // --- Firebase 配置 (已根据您的凭证填入) ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyB0hEE4vGfJHTfzsjQXMADLNN6CHFwNXfo",
+            authDomain: "hanzi-b4d62.firebaseapp.com",
+            projectId: "hanzi-b4d62",
+            storageBucket: "hanzi-b4d62.firebasestorage.app",
+            messagingSenderId: "281571520592",
+            appId: "1:281571520592:web:6dbf51cec514ff3a5b6155",
+            measurementId: "G-H5D084JP0S"
+        };
+
+        const appId = 'hanze-system-v3-production';
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        const ADMIN_PASSWORD = "admin888";
+        
+        const CATEGORIES = [
+            { id: 'all', name: '全集档案', icon: <Layers size={18}/> },
+            { id: 'boss', name: 'BOSS 监督', icon: <Crown size={18}/> },
+            { id: 'strict', name: '严厉监督', icon: <Gavel size={18}/> }
+        ];
+
+        const INITIAL_CONFIG = {
+            landing: { mainTitle: "汉责", stampText: "督学", subTitle: "THE ELITE COLLECTIVE", description: "以责为重，以墨为锋。拒绝平庸的自律，开启深度督学时代的革新之旅。", enterButton: "验证身份并开启", footer: "HANZE STUDIO · 2024-2025" },
+            header: { title: "汉责全能系统", subtitle: "Core Interface" },
+            about: {
+                title: "品牌叙事",
+                description: "汉责工作室致力于建立高效的高压督导环境。我们通过建立精神契约、实时轨迹追踪，帮助学员在激烈的竞争中保持绝对的专注与掌控。",
+                achievements: [ { label: "累计时长", value: "18,600+", unit: "Hrs" }, { label: "上岸人数", value: "920+", unit: "人" }, { label: "满意度", value: "4.99", unit: "/ 5.0" } ]
+            },
+            teamPage: { title: "档案库", subtitle: "经工作室严格认证的监督执剑人。" },
+            pricing: { title: "资费引擎", categories: [ { id: "cat_p1", name: "监督方案", options: [ { price: "299", unit: "周", desc: "方案描述示例。" } ] } ] },
+            payment: { wechatQr: "", alipayQr: "" }
+        };
+
+        // --- 子组件 ---
+
+        const StatusIndicator = ({ status }) => {
+            const cfg = { available: { color: 'bg-emerald-500', label: '在岗' }, busy: { color: 'bg-amber-500', label: '忙碌' }, away: { color: 'bg-zinc-500', label: '离线' } };
+            const item = cfg[status] || cfg.away;
+            return (
+                <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-black/80 border border-white/10 backdrop-blur-sm shadow-xl">
+                    <div className={`w-1.5 h-1.5 rounded-full ${item.color} animate-pulse`}></div>
+                    <span className="text-[9px] font-black text-white/90 uppercase tracking-tighter">{item.label}</span>
+                </div>
+            );
+        };
+
+        const StarRating = ({ rating = 5 }) => (
+            <div className="flex items-center gap-0.5">
+                {[1, 2, 3, 4, 5].map(i => (
+                    <Star key={i} size={10} fill={i <= rating ? "currentColor" : "none"} className={i <= rating ? "text-amber-500" : "text-zinc-800"} />
+                ))}
+            </div>
+        );
+
+        const ToastComp = ({ msg, onClose }) => {
+            useEffect(() => { const t = setTimeout(onClose, 3000); return () => clearTimeout(t); }, []);
+            return (
+                <div className={`fixed bottom-10 left-1/2 -translate-x-1/2 px-10 py-4 rounded-full shadow-2xl text-white font-black flex items-center gap-4 z-[2000] animate-fade-up border border-white/10 ${msg.type === 'error' ? 'bg-red-700' : 'bg-indigo-700'}`}>
+                    {msg.type === 'error' ? <AlertTriangle size={20}/> : <CheckCircle2 size={20}/>}
+                    <span className="text-sm tracking-[0.2em]">{msg.message}</span>
+                </div>
+            );
+        };
+
+        // --- App 主体程序 ---
+        function App() {
+            const [user, setUser] = useState(null);
+            const [viewMode, setViewMode] = useState('landing'); 
+            const [activeTab, setActiveTab] = useState('team'); 
+            const [teamFilter, setTeamFilter] = useState('all');
+            const [config, setConfig] = useState(INITIAL_CONFIG);
+            const [team, setTeam] = useState([]);
+            const [searchTerm, setSearchTerm] = useState("");
+            const [selectedPerson, setSelectedPerson] = useState(null);
+            const [selectedService, setSelectedService] = useState(null);
+            const [toast, setToast] = useState(null);
+            const [isAdmin, setIsAdmin] = useState(false);
+            const [showLogin, setShowLogin] = useState(false);
+            const [showAddMember, setShowAddMember] = useState(false);
+            const [showMasterConsole, setShowMasterConsole] = useState(false);
+            const [deleteConfirm, setDeleteConfirm] = useState(null);
+            const [passInput, setPassInput] = useState("");
+            const [loading, setLoading] = useState(true);
+
+            const fileRefs = { wechat: useRef(), alipay: useRef(), editAvatar: useRef() };
+
+            useEffect(() => {
+                const loader = document.getElementById('initial-loader');
+                if (loader) loader.style.display = 'none';
+            }, []);
+
+            useEffect(() => {
+                const initAuth = async () => {
+                    try { await signInAnonymously(auth); } catch (e) { console.error("Login Failed", e); }
+                };
+                initAuth();
+                const unsub = onAuthStateChanged(auth, setUser);
+                return () => unsub();
+            }, []);
+
+            useEffect(() => {
+                if (!user) return;
+                const configRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'mainConfig');
+                const teamColl = collection(db, 'artifacts', appId, 'public', 'data', 'members');
+
+                const unsubConfig = onSnapshot(configRef, (snap) => {
+                    if (snap.exists()) {
+                        const remoteData = snap.data();
+                        setConfig({
+                            ...INITIAL_CONFIG,
+                            ...remoteData,
+                            landing: { ...INITIAL_CONFIG.landing, ...(remoteData.landing || {}) },
+                            about: { ...INITIAL_CONFIG.about, ...(remoteData.about || {}) },
+                            pricing: { ...INITIAL_CONFIG.pricing, ...(remoteData.pricing || {}) },
+                            payment: { ...INITIAL_CONFIG.payment, ...(remoteData.payment || {}) }
+                        });
+                    } else {
+                        setDoc(configRef, INITIAL_CONFIG);
+                    }
+                    setLoading(false);
+                });
+
+                const unsubTeam = onSnapshot(teamColl, (snap) => {
+                    setTeam(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+                });
+
+                return () => { unsubConfig(); unsubTeam(); };
+            }, [user]);
+
+            const showMsg = (message, type = "success") => setToast({ message, type });
+
+            const handleLogin = (e) => {
+                e.preventDefault();
+                if (passInput === ADMIN_PASSWORD) {
+                    setIsAdmin(true); setShowLogin(false); setPassInput(""); showMsg("管理员主权限已解锁");
+                } else showMsg("密钥验证失败", "error");
+            };
+
+            const updateConfig = async (newCfg) => {
+                try {
+                    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'mainConfig'), newCfg);
+                    showMsg("云端配置同步成功");
+                } catch (e) { showMsg("保存失败", "error"); }
+            };
+
+            const commitMemberChange = async (pId, updates) => {
+                if (selectedPerson?.id === pId) {
+                    setSelectedPerson(prev => ({ ...prev, ...updates }));
+                }
+                setTeam(prev => prev.map(m => m.id === pId ? { ...m, ...updates } : m));
+                
+                try {
+                    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'members', pId), updates);
+                } catch(e) { console.error("Cloud Error", e); }
+            };
+
+            const handleArchiveDelete = async (pId) => {
+                await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'members', pId));
+                setTeam(team.filter(m => m.id !== pId));
+                setSelectedPerson(null);
+                setDeleteConfirm(null);
+                showMsg("档案注销成功", "error");
+            };
+
+            const handleFileAction = (e, callback) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                if (file.size > 800000) return showMsg("图片需小于 800KB", "error");
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    callback(reader.result);
+                    e.target.value = ""; 
+                };
+                reader.readAsDataURL(file);
+            };
+
+            const filteredTeam = useMemo(() => {
+                let list = team.filter(m => (m.name || "").toLowerCase().includes(searchTerm.toLowerCase()));
+                if (teamFilter !== 'all') list = list.filter(m => m.category === teamFilter);
+                return list;
+            }, [team, searchTerm, teamFilter]);
+
+            // --- 弹窗逻辑 ---
+
+            const MasterConsoleModal = () => {
+                const [tab, setTab] = useState('price');
+                return (
+                    <div className="fixed inset-0 bg-black/98 z-[500] flex items-center justify-center p-6 animate-in fade-in" onClick={() => setShowMasterConsole(false)}>
+                        <div onClick={e => e.stopPropagation()} className="bg-zinc-950 border border-zinc-800 w-full max-w-6xl rounded-[4rem] p-12 max-h-[90vh] overflow-y-auto no-scrollbar shadow-2xl space-y-10">
+                            <div className="flex justify-between items-center border-b border-zinc-900 pb-8"><h2 className="text-3xl font-black text-amber-500 italic uppercase">Master Control</h2><button onClick={() => setShowMasterConsole(false)} className="p-3 text-zinc-600 hover:text-white transition-colors"><X size={36}/></button></div>
+                            <div className="flex gap-4">
+                                {['price', 'about', 'pay'].map(t => (
+                                    <button key={t} onClick={() => setTab(t)} className={`px-8 py-3 rounded-2xl text-[11px] font-black uppercase transition-all ${tab === t ? 'bg-indigo-600 text-white shadow-xl' : 'bg-zinc-900 text-zinc-600'}`}>{t === 'price' ? '资费管理' : t === 'about' ? '介绍修改' : '支付通道'}</button>
+                                ))}
+                            </div>
+                            <div className="text-white min-h-[40vh]">
+                                {tab === 'price' && (
+                                    <div className="space-y-10 animate-fade-up">
+                                        <div className="flex justify-between items-center"><h3 className="text-emerald-500 font-black uppercase text-xs tracking-widest">资费管理</h3><button onClick={() => setConfig({...config, pricing: {...config.pricing, categories: [...config.pricing.categories, {id: `c_${Date.now()}`, name: '新分类', options: []}]}})} className="bg-indigo-600 px-5 py-2 rounded-xl text-[10px] font-black shadow-lg">+ 增加分类</button></div>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                                            {config.pricing.categories.map((cat, ci) => (
+                                                <div key={cat.id} className="bg-zinc-900/40 p-8 rounded-[3rem] border border-zinc-800 relative group">
+                                                    <button onClick={() => setConfig({...config, pricing: {...config.pricing, categories: config.pricing.categories.filter((_, i) => i !== ci)}})} className="absolute top-6 right-6 text-red-500 opacity-20 group-hover:opacity-100 transition-opacity p-2"><Trash2 size={20}/></button>
+                                                    <input className="bg-transparent border-b border-zinc-800 text-xl font-black w-full pb-2 mb-6 outline-none" value={cat.name} onChange={e => { let nc = [...config.pricing.categories]; nc[ci].name = e.target.value; setConfig({...config, pricing: {...config.pricing, categories: nc}}); }} />
+                                                    <div className="space-y-4">
+                                                        {cat.options.map((opt, oi) => (
+                                                            <div key={oi} className="bg-black/50 p-6 rounded-3xl border border-white/5 space-y-4 relative">
+                                                                <div className="grid grid-cols-2 gap-4">
+                                                                    <input className="bg-zinc-800 rounded-lg px-3 py-2 text-sm text-white" value={opt.price} placeholder="价格" onChange={e => { let nc = [...config.pricing.categories]; nc[ci].options[oi].price = e.target.value; setConfig({...config, pricing: {...config.pricing, categories: nc}}); }} />
+                                                                    <input className="bg-zinc-800 rounded-lg px-3 py-2 text-sm text-white" value={opt.unit} placeholder="单位" onChange={e => { let nc = [...config.pricing.categories]; nc[ci].options[oi].unit = e.target.value; setConfig({...config, pricing: {...config.pricing, categories: nc}}); }} />
+                                                                </div>
+                                                                <textarea className="w-full bg-zinc-800 px-3 py-2 rounded-lg text-[10px] h-16 resize-none text-white" value={opt.desc} placeholder="方案说明" onChange={e => { let nc = [...config.pricing.categories]; nc[ci].options[oi].desc = e.target.value; setConfig({...config, pricing: {...config.pricing, categories: nc}}); }} />
+                                                                <button onClick={() => { let nc = [...config.pricing.categories]; nc[ci].options = nc[ci].options.filter((_, i) => i !== oi); setConfig({...config, pricing: {...config.pricing, categories: nc}}); }} className="text-[8px] text-red-500 font-black uppercase text-center w-full pt-2">删除子项</button>
+                                                            </div>
+                                                        ))}
+                                                        <button onClick={() => { let nc = [...config.pricing.categories]; nc[ci].options.push({price: '99', unit: '周', desc: '新计划描述项'}); setConfig({...config, pricing: {...config.pricing, categories: nc}}); }} className="w-full py-4 border border-dashed border-zinc-800 rounded-2xl text-[9px] text-zinc-700 hover:text-white uppercase transition-colors">+ 增加子项方案</button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                                {tab === 'about' && (
+                                    <div className="space-y-12 animate-fade-up max-w-4xl">
+                                        <div className="space-y-4">
+                                            <label className="text-[10px] text-zinc-600 font-black uppercase tracking-widest italic">主页大标题</label>
+                                            <input className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl px-6 py-4 text-xl font-black italic shadow-inner text-white" value={config.about.title} onChange={e => setConfig({...config, about: {...config.about, title: e.target.value}})} />
+                                            <label className="text-[10px] text-zinc-600 font-black uppercase mt-6 block tracking-widest italic">品牌正文</label>
+                                            <textarea className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl px-6 py-4 h-64 leading-[2.2] text-sm resize-none italic shadow-inner text-white" value={config.about.description} onChange={e => setConfig({...config, about: {...config.about, description: e.target.value}})} />
+                                        </div>
+                                    </div>
+                                )}
+                                {tab === 'pay' && (
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-16 animate-fade-up">
+                                        {['wechatQr', 'alipayQr'].map(t => (
+                                            <div key={t} className="p-12 bg-black rounded-[4rem] border border-white/5 flex flex-col items-center gap-10 group">
+                                                <div className="w-56 h-56 bg-zinc-900 rounded-[3.5rem] overflow-hidden flex items-center justify-center border-4 border-white/10 group-hover:border-emerald-500/30 transition-all relative">
+                                                    {config.payment[t] ? <img src={config.payment[t]} className="w-full h-full object-contain p-2" /> : <ImageIcon className="text-zinc-800" size={64}/>}
+                                                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity cursor-pointer" onClick={() => (t === 'wechatQr' ? fileRefs.wechat : fileRefs.alipay).current.click()}><Camera size={56}/></div>
+                                                </div>
+                                                <input ref={t === 'wechatQr' ? fileRefs.wechat : fileRefs.alipay} type="file" hidden accept="image/*" onChange={e => handleFileAction(e, (res) => setConfig(p => ({...p, payment: {...p.payment, [t]: res}})))} />
+                                                <p className="text-sm font-black text-zinc-500 uppercase tracking-[0.5em]">{t.includes('wechat')?'WeChat Pay':'Alipay'}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                            <button onClick={() => updateConfig(config)} className="w-full py-8 bg-white text-black rounded-[3rem] font-black uppercase shadow-2xl active:scale-95 transition-all text-xl mt-12">DEPLOY TO PRODUCTION</button>
+                        </div>
+                    </div>
+                );
+            };
+
+            const AddMemberModal = () => {
+                const [form, setForm] = useState({ name: '', category: 'strict', role: '', bio: '', photo: '' });
+                const handleAdd = async () => {
+                    if(!form.name) return showMsg("姓名必填", "error");
+                    const newId = `HZ-OP-${Date.now().toString().slice(-4)}`;
+                    const m = { ...form, id: newId, status: 'available', likes: 0, stars: 5.0, photo: form.photo || `https://api.dicebear.com/7.x/avataaars/svg?seed=${form.name}` };
+                    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'members', newId), m);
+                    setShowAddMember(false); showMsg("同步档案上线成功");
+                };
+                return (
+                    <div className="fixed inset-0 bg-black/95 z-[500] flex items-center justify-center p-6 animate-in fade-in" onClick={() => setShowAddMember(false)}>
+                        <div onClick={e => e.stopPropagation()} className="bg-zinc-950 border border-zinc-800 w-full max-w-lg rounded-[3rem] p-10 space-y-6 shadow-2xl text-white">
+                            <h2 className="text-xl font-black uppercase tracking-tighter">录入新成员</h2>
+                            <div className="flex flex-col items-center gap-4">
+                                <div onClick={() => document.getElementById('new-av').click()} className="w-24 h-24 rounded-3xl border-2 border-dashed border-zinc-700 flex items-center justify-center cursor-pointer hover:border-indigo-500 overflow-hidden relative group">
+                                    {form.photo ? <img src={form.photo} className="w-full h-full object-cover"/> : <Camera size={24}/>}
+                                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"><Upload size={16}/></div>
+                                </div>
+                                <input id="new-av" type="file" hidden onChange={e => handleFileAction(e, (res) => setForm({...form, photo: res}))} />
+                            </div>
+                            <div className="space-y-4">
+                                <input className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-sm outline-none text-white" placeholder="姓名" value={form.name} onChange={e => setForm({...form, name: e.target.value})} />
+                                <select className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-sm outline-none text-white" value={form.category} onChange={e => setForm({...form, category: e.target.value})}><option value="strict">严厉监督员</option><option value="boss">BOSS监督员</option></select>
+                                <input className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-sm outline-none text-white" placeholder="职位" value={form.role} onChange={e => setForm({...form, role: e.target.value})} />
+                                <textarea className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-sm h-24 outline-none resize-none text-white" placeholder="简介" value={form.bio} onChange={e => setForm({...form, bio: e.target.value})} />
+                            </div>
+                            <button onClick={handleAdd} className="w-full py-4 bg-indigo-600 rounded-2xl font-black uppercase active:scale-95 transition-all shadow-xl shadow-indigo-900/20">同步档案至云端</button>
+                        </div>
+                    </div>
+                );
+            };
+
+            if (loading) return null;
+
+            if (viewMode === 'landing') {
+                return (
+                    <div className="min-h-screen flex flex-col items-center justify-center text-center p-8 relative bg-[#010101]">
+                        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(99,102,241,0.08)_0%,transparent_70%)]"></div>
+                        <div className="relative z-10 animate-fade-up flex flex-col items-center space-y-12">
+                            <div className="relative">
+                                <h1 className="text-[10rem] md:text-[15rem] font-shufa text-white tracking-[0.1em] leading-none drop-shadow-[0_0_80px_rgba(255,255,255,0.15)]">{config.landing.mainTitle}</h1>
+                                <div className="absolute -top-8 -right-16 bg-red-900 border-2 border-red-700 p-4 rounded-lg shadow-2xl rotate-6 animate-pulse shadow-red-900/50"><span className="font-shufa writing-vertical text-3xl text-red-50 tracking-[0.2em]">{config.landing.stampText}</span></div>
+                            </div>
+                            <div className="space-y-6">
+                                <p className="text-zinc-600 uppercase tracking-[1em] text-xs font-black italic">{config.landing.subTitle}</p>
+                                <p className="text-zinc-400 max-w-lg mx-auto leading-loose text-lg font-medium italic opacity-80 whitespace-pre-wrap px-6">{config.landing.description}</p>
+                            </div>
+                            <button onClick={() => setViewMode('visitor')} className="group px-20 py-6 bg-white text-black rounded-full font-black text-2xl hover:scale-105 shadow-[0_0_100px_rgba(255,255,255,0.15)] uppercase tracking-[0.4em] relative overflow-hidden transition-all active:scale-95 shadow-black/50">
+                                <span className="relative z-10">{config.landing.enterButton}</span>
+                                <div className="absolute inset-0 bg-indigo-600 translate-y-full group-hover:translate-y-0 transition-transform duration-700"></div>
+                            </button>
+                            <p className="text-zinc-900 text-[11px] tracking-[0.6em] font-black uppercase mt-12">{config.landing.footer}</p>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="min-h-screen flex flex-col bg-[#050505]">
+                    <header className="sticky top-0 z-50 glass-card border-b border-white/5 py-5 px-10 shadow-2xl">
+                        <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-8">
+                            <div className="flex items-center gap-5">
+                                <div className="p-3 bg-indigo-600 rounded-2xl shadow-indigo-900/40 shadow-2xl"><Building2 size={24} className="text-white"/></div>
+                                <div><h1 className="text-2xl font-black tracking-widest uppercase italic">{config.header.title}</h1><p className="text-[9px] font-bold text-zinc-700 uppercase tracking-[0.4em]">{config.header.subtitle}</p></div>
+                            </div>
+                            <div className="flex items-center bg-black/80 p-2 rounded-[1.5rem] border border-white/5 shadow-inner">
+                                {['team', 'about', 'price'].map(t => (
+                                    <button key={t} onClick={() => { setActiveTab(t); setSelectedPerson(null); }} className={`px-10 py-3 rounded-[1rem] text-[11px] font-black uppercase tracking-[0.3em] transition-all ${activeTab === t ? 'bg-indigo-600 text-white shadow-2xl' : 'text-zinc-600 hover:text-zinc-300'}`}>
+                                        {t === 'team' ? '团队' : t === 'about' ? '叙事' : '结算'}
+                                    </button>
+                                ))}
+                            </div>
+                            <div className="flex items-center gap-6">
+                                {isAdmin && <button onClick={() => setShowMasterConsole(true)} className="p-4 bg-amber-600/10 text-amber-500 rounded-full border border-amber-500/30 hover:bg-amber-600 hover:text-black transition-all shadow-amber-900/20 shadow-xl"><Settings size={20}/></button>}
+                                <button onClick={() => setViewMode('landing')} className="text-[10px] font-black text-zinc-700 hover:text-white uppercase tracking-widest transition-colors">退出系统</button>
+                                <button onClick={() => isAdmin ? setIsAdmin(false) : setShowLogin(true)} className={`p-4 rounded-full border transition-all ${isAdmin ? 'bg-amber-600 text-black border-amber-500 shadow-lg shadow-amber-900/40' : 'bg-zinc-900 text-zinc-500 border-white/10'}`}>
+                                    {isAdmin ? <ShieldAlert size={20}/> : <Lock size={20}/>}
+                                </button>
+                            </div>
+                        </div>
+                    </header>
+
+                    <main className="flex-1 overflow-y-auto no-scrollbar pb-40">
+                        <div className="max-w-7xl mx-auto px-10 py-20 animate-fade-up">
+                            {activeTab === 'team' && (
+                                <div className="space-y-24">
+                                    <div className="flex flex-col lg:flex-row justify-between items-center gap-12">
+                                        <div className="max-w-3xl text-center lg:text-left space-y-10">
+                                            <h2 className="text-8xl font-black tracking-tighter text-white italic drop-shadow-2xl">{config?.teamPage?.title || '档案库'}</h2>
+                                            <div className="flex flex-wrap justify-center lg:justify-start gap-5">
+                                                {CATEGORIES.map(cat => (
+                                                    <button key={cat.id} onClick={() => setTeamFilter(cat.id)} className={`flex items-center gap-4 px-10 py-4 rounded-[1.8rem] border border-white/5 text-[12px] font-black uppercase tracking-widest transition-all hover:border-indigo-600 ${teamFilter === cat.id ? 'active-filter' : 'bg-zinc-900/30 text-zinc-600'}`}>{cat.icon} {cat.name}</button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-6 w-full lg:w-auto">
+                                            <div className="relative flex-1 lg:w-[32rem] shadow-[0_20px_50px_rgba(0,0,0,0.5)]">
+                                                <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-zinc-800" size={20}/>
+                                                <input type="text" placeholder="GLOBAL ENCRYPTED SEARCH..." className="w-full bg-zinc-900/60 border border-white/5 rounded-[2rem] py-6 pl-16 pr-8 text-sm text-white focus:border-indigo-600 transition-all outline-none tracking-widest uppercase italic shadow-inner" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+                                            </div>
+                                            {isAdmin && <button onClick={() => setShowAddMember(true)} className="p-6 bg-indigo-600 text-white rounded-[2rem] shadow-2xl hover:scale-105 active:scale-95 transition-all shadow-indigo-900/40"><Plus size={32}/></button>}
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-16">
+                                        {filteredTeam.map((p, idx) => (
+                                            <div key={p.id} className={`p-10 rounded-[4rem] glass-card transition-all hover:-translate-y-4 overflow-hidden group relative shadow-2xl animate-fade-up`} style={{animationDelay: `${idx*0.05}s`}}>
+                                                <div className={`absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-1000 -z-10 ${p.category === 'boss' ? 'boss-card' : 'strict-card'}`}></div>
+                                                {isAdmin && (
+                                                    <button onClick={(e) => { e.stopPropagation(); setDeleteConfirm(p.id); }} className="absolute top-8 right-8 p-3 bg-red-600/10 text-red-500 rounded-full hover:bg-red-600 hover:text-white transition-all z-20 shadow-xl border border-red-900/20"><Trash2 size={18}/></button>
+                                                )}
+                                                <div onClick={() => setSelectedPerson(p)} className="cursor-pointer">
+                                                    <div className="flex justify-between items-start mb-12">
+                                                        <div className="relative group/av shadow-2xl rounded-[3.5rem] overflow-hidden border-2 border-white/10"><img src={p.photo} className="w-32 h-32 object-cover group-hover/av:scale-110 transition-transform duration-1000" /><div className="absolute -bottom-4 -right-4 scale-125"><StatusIndicator status={p.status}/></div></div>
+                                                        <div className="text-right space-y-4 pt-2"><div className={`px-5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest ${p.category === 'boss' ? 'bg-amber-600 text-black shadow-lg shadow-amber-900/30' : 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/30'}`}>RANK {p.category === 'boss' ? 'S+' : 'A'}</div><div className="flex text-amber-500 justify-end"><StarRating rating={p.stars}/></div></div>
+                                                    </div>
+                                                    <h4 className="text-4xl font-black text-white mb-2 tracking-tighter uppercase italic">{p.name}</h4><p className="text-[12px] font-black text-zinc-700 uppercase tracking-[0.4em] mb-10">{p.role}</p>
+                                                    <div className="bg-black/50 rounded-[2.5rem] p-8 text-base text-zinc-400 italic mb-12 line-clamp-3 leading-loose border border-white/5 shadow-inner font-serif italic">“ {p.bio} ”</div>
+                                                    <div className="flex items-center justify-between pt-8 border-t border-white/5 font-black"><div className="flex items-center gap-3 text-rose-600 font-black font-serif"><Heart size={20} fill="currentColor"/><span className="text-lg">{p.likes}</span></div><div className="text-[11px] font-black text-zinc-800 uppercase flex items-center gap-3 group-hover:text-white transition-all tracking-widest italic">ACCESS DATA <ChevronRight size={18}/></div></div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                            {activeTab === 'about' && (
+                                <div className="max-w-4xl mx-auto space-y-40 animate-fade-up">
+                                    <div className="text-center space-y-12">
+                                        <h2 className="text-9xl font-black italic text-white tracking-tighter uppercase opacity-90 drop-shadow-2xl">{config.about.title}</h2>
+                                        <p className="text-zinc-500 leading-[2.6] text-center italic text-2xl px-16 font-medium whitespace-pre-wrap">{config.about.description}</p>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-12 px-10">
+                                        {config.about.achievements?.map((a, i) => (
+                                            <div key={i} className="glass-card p-16 rounded-[4.5rem] text-center shadow-2xl relative overflow-hidden group hover:scale-105 transition-transform shadow-black/80"><p className="text-[12px] font-black text-zinc-700 uppercase tracking-[0.5em] mb-6 italic">{a.label}</p><div className="text-7xl font-black text-white tracking-tighter">{a.value}<span className="text-xl text-indigo-500 ml-3 italic font-bold">{a.unit}</span></div></div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                            {activeTab === 'price' && (
+                                <div className="space-y-32 animate-fade-up">
+                                    <div className="text-center space-y-4"><h2 className="text-8xl font-black italic text-white tracking-tighter uppercase drop-shadow-2xl">{config.pricing.title}</h2><p className="text-zinc-800 text-sm font-black uppercase tracking-[1em] opacity-40">Financial Settlement Protocol</p></div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-16 max-w-6xl mx-auto">
+                                        {config.pricing.categories.map(cat => (
+                                            <div key={cat.id} className="glass-card rounded-[5rem] overflow-hidden shadow-[0_50px_120px_-30px_rgba(0,0,0,1)] border-white/10 relative">
+                                                <div className="p-12 bg-white/[0.02] text-center font-black text-white text-2xl uppercase tracking-[0.5em] italic border-b border-white/5">{cat.name}</div>
+                                                <div className="p-12 space-y-12">
+                                                    {cat.options.map((opt, i) => (
+                                                        <div key={i} className="p-12 rounded-[4rem] border border-white/5 bg-black/60 group relative overflow-hidden transition-all hover:bg-black/40">
+                                                            <div className="flex justify-between items-center mb-10 relative z-10">
+                                                                <div className={`px-6 py-2.5 bg-indigo-900/20 text-indigo-400 text-[11px] font-black rounded-2xl uppercase border border-indigo-500/20 shadow-xl shadow-black/50`}>PROTOCOL.v3</div>
+                                                                <span className="text-5xl text-white font-black tracking-tighter group-hover:text-indigo-500 transition-colors">￥{opt.price}<span className="text-sm text-zinc-800 ml-2">/ {opt.unit || '周'}</span></span>
+                                                            </div>
+                                                            <p className="text-lg text-zinc-500 italic mb-12 leading-relaxed font-bold relative z-10 px-6 font-serif">“ {opt.desc} ”</p>
+                                                            <button onClick={() => setSelectedService({ catName: cat.name, opt })} className="w-full py-7 bg-white text-black rounded-[2.5rem] font-black text-[14px] uppercase tracking-[0.3em] shadow-2xl active:scale-95 transition-all hover:bg-zinc-200 shadow-white/5">ESTABLISH CONTRACT</button>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </main>
+
+                    {/* --- 浮层交互 --- */}
+                    <div id="interaction-portal">
+                        {selectedPerson && (
+                            <div className="fixed inset-0 bg-black/98 flex items-center justify-center p-6 z-[800] animate-in fade-in" onClick={() => setSelectedPerson(null)}>
+                                <div className={`w-full max-w-6xl rounded-[5rem] border shadow-[0_0_150px_rgba(0,0,0,1)] flex flex-col md:flex-row overflow-hidden glass-card transition-all duration-1000 ${selectedPerson.category === 'boss' ? 'boss-card shadow-amber-900/10' : 'strict-card shadow-indigo-900/10'}`} onClick={e => e.stopPropagation()}>
+                                    <div className="md:w-[42%] p-20 bg-black/70 flex flex-col items-center border-r border-white/5 text-center relative overflow-hidden">
+                                        <div 
+                                            className="relative mb-16 group cursor-pointer shadow-2xl rounded-[4.5rem] overflow-hidden border-8 border-white/5 group-hover:border-indigo-600 transition-all duration-700" 
+                                            onClick={() => isAdmin && fileRefs.editAvatar.current.click()}
+                                        >
+                                            <img src={selectedPerson.photo} className="w-72 h-72 object-cover scale-105" />
+                                            {isAdmin && (
+                                                <div className="absolute inset-0 bg-black/80 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all">
+                                                    <Camera size={56}/>
+                                                </div>
+                                            )}
+                                            <div className="absolute -bottom-4 -right-4 scale-[1.6]"><StatusIndicator status={selectedPerson.status}/></div>
+                                        </div>
+                                        <input 
+                                            ref={fileRefs.editAvatar} 
+                                            type="file" 
+                                            hidden 
+                                            accept="image/*" 
+                                            onChange={e => handleFileAction(e, (res) => commitMemberChange(selectedPerson.id, {photo: res}))} 
+                                        />
+                                        <div className="w-full space-y-6">
+                                            {isAdmin ? (
+                                                <input className="w-full bg-zinc-900 border border-zinc-800 text-center text-5xl font-black italic rounded-[2rem] py-4 outline-none shadow-xl focus:ring-4 ring-indigo-500/20 text-white" value={selectedPerson.name} onChange={e => commitMemberChange(selectedPerson.id, {name: e.target.value})} />
+                                            ) : (
+                                                <h2 className="text-6xl font-black text-white italic tracking-tighter uppercase">{selectedPerson.name}</h2>
+                                            )}
+                                            {isAdmin ? (
+                                                <input className="w-full max-w-[20rem] bg-zinc-900 border border-zinc-800 text-center text-[11px] font-black uppercase tracking-[0.5em] text-zinc-500 rounded-xl py-2 mx-auto outline-none" value={selectedPerson.role} onChange={e => commitMemberChange(selectedPerson.id, {role: e.target.value})} />
+                                            ) : (
+                                                <p className="text-zinc-600 text-[13px] font-black uppercase tracking-[0.5em] italic">{selectedPerson.role}</p>
+                                            )}
+                                        </div>
+                                        <div className="mt-20 w-full space-y-6"><button onClick={() => { setActiveTab('price'); setSelectedPerson(null); }} className="w-full py-8 bg-white text-black rounded-[3rem] font-black uppercase tracking-widest text-sm hover:bg-zinc-200 active:scale-95 transition-all shadow-2xl">INITIALIZE CONNECTION</button></div>
+                                    </div>
+                                    <div className="md:w-[58%] p-20 overflow-y-auto relative no-scrollbar bg-black/40 shadow-inner">
+                                        <button onClick={() => setSelectedPerson(null)} className="absolute top-12 right-12 text-zinc-800 hover:text-white transition-colors p-4 bg-zinc-950 rounded-full border border-white/5 shadow-2xl shadow-black"><X size={40}/></button>
+                                        <div className="space-y-16">
+                                            <h3 className="text-[11px] font-black uppercase text-indigo-600 underline decoration-indigo-900 decoration-8 underline-offset-[1.2rem] tracking-[0.6em] italic mb-10 uppercase tracking-widest italic">Archive Biography</h3>
+                                            <div className="bg-white/[0.01] p-12 rounded-[4rem] border border-white/5 shadow-inner text-white">
+                                                {isAdmin ? (
+                                                    <textarea className="w-full bg-transparent text-zinc-300 leading-[2.8] text-xl font-medium italic h-96 outline-none resize-none no-scrollbar" value={selectedPerson.bio} onChange={e => commitMemberChange(selectedPerson.id, {bio: e.target.value})} />
+                                                ) : (
+                                                    <p className="text-zinc-300 leading-[2.8] text-xl font-medium italic whitespace-pre-wrap px-4 font-serif italic">“ {selectedPerson.bio} ”</p>
+                                                )}
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-10 pt-4">
+                                                <div className="p-10 rounded-[3.5rem] bg-zinc-950/60 border border-white/5 flex flex-col gap-6 shadow-black/50 shadow-xl"><ShieldCheck size={48} className="text-indigo-500 drop-shadow-[0_0_15px_rgba(99,102,241,0.4)]"/><p className="text-sm font-black text-white tracking-[0.2em] uppercase italic italic tracking-widest">Privacy Protected</p></div>
+                                                <div className="p-10 rounded-[3.5rem] bg-zinc-950/60 border border-white/5 flex flex-col gap-6 shadow-black/50 shadow-xl"><Zap size={48} className="text-amber-500 drop-shadow-[0_0_15px_rgba(245,158,11,0.4)]"/><p className="text-sm font-black text-white tracking-[0.2em] uppercase italic italic tracking-widest">Direct Line</p></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {deleteConfirm && (
+                            <div className="fixed inset-0 bg-black/99 flex items-center justify-center p-8 z-[1200] animate-in fade-in">
+                                <div className="glass-card w-full max-sm:w-full max-w-sm p-14 rounded-[4.5rem] text-center space-y-10 shadow-2xl border border-red-900/40 shadow-red-900/20">
+                                    <div className="w-24 h-24 bg-red-600/10 rounded-full flex items-center justify-center mx-auto text-red-600 animate-bounce shadow-xl shadow-red-950/50"><AlertTriangle size={64}/></div>
+                                    <div className="space-y-4"><h3 className="text-3xl font-black italic text-white uppercase tracking-tighter italic">TERMINATION</h3><p className="text-[11px] text-zinc-600 font-bold uppercase tracking-[0.2em] leading-relaxed italic">确定要注销此项加密档案吗？此操作不可撤回。</p></div>
+                                    <div className="flex flex-col gap-4 pt-4">
+                                        <button onClick={() => handleArchiveDelete(deleteConfirm)} className="w-full py-5 bg-red-600 text-white rounded-[2.5rem] font-black uppercase tracking-[0.4em] hover:bg-red-500 shadow-2xl active:scale-95 transition-all">确认执行注销</button>
+                                        <button onClick={() => setDeleteConfirm(null)} className="text-[10px] font-black text-zinc-700 hover:text-white uppercase transition-colors tracking-widest italic text-center">返回</button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {selectedService && (
+                            <div className="fixed inset-0 bg-black/98 flex items-center justify-center p-8 z-[1200] animate-in fade-in" onClick={() => setSelectedService(null)}>
+                                <div className="glass-card w-full max-w-2xl rounded-[5rem] overflow-hidden p-16 text-center space-y-16 shadow-[0_0_250px_rgba(99,102,241,0.25)] border-indigo-600/20" onClick={e => e.stopPropagation()}>
+                                    <h3 className="text-5xl font-black italic text-white tracking-tighter uppercase italic tracking-[0.1em]">PAYMENT HUB</h3>
+                                    <div className="bg-black/90 p-16 rounded-[4.5rem] border border-white/5 shadow-2xl relative overflow-hidden shadow-black/80">
+                                        <div className="grid grid-cols-2 gap-16 mb-12 relative z-10">
+                                            {['wechatQr', 'alipayQr'].map(t => (
+                                                <div key={t} className="space-y-6">
+                                                    <div className="bg-white p-3 rounded-[2.5rem] aspect-square flex items-center justify-center shadow-xl overflow-hidden border-8 border-white/10 ring-1 ring-white/20">
+                                                        {config?.payment?.[t] ? <img src={config.payment[t]} className="w-full h-full object-contain p-2" /> : <div className="flex flex-col items-center gap-3 text-zinc-300"><QrCode size={60}/></div>}
+                                                    </div>
+                                                    <p className="text-xs font-black text-zinc-500 uppercase tracking-[0.4em] italic">{t.includes('wechat')?'WeChat Pay':'Alipay'}</p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <p className="text-[10px] text-zinc-600 font-black italic tracking-widest opacity-60 text-center uppercase">Screenshots required for verification</p>
+                                    </div>
+                                    <button onClick={() => setSelectedService(null)} className="text-[11px] font-black text-zinc-800 hover:text-white transition-all uppercase tracking-[0.6em] italic active:scale-95">CLOSE TERMINAL</button>
+                                </div>
+                            </div>
+                        )}
+
+                        {showLogin && (
+                            <div className="fixed inset-0 bg-black/99 flex items-center justify-center p-8 z-[2000]">
+                                <div className="w-full max-w-sm p-16 glass-card rounded-[4.5rem] space-y-16 text-center shadow-[0_0_120px_rgba(0,0,0,1)] border border-white/10 shadow-indigo-900/20">
+                                    <div className="space-y-6"><ShieldAlert size={72} className="text-indigo-600 mx-auto animate-pulse drop-shadow-[0_0_20px_rgba(99,102,241,0.5)]"/><h2 className="text-3xl font-black uppercase text-white italic tracking-[0.4em] italic uppercase tracking-widest text-center">Admin Access</h2></div>
+                                    <form onSubmit={handleLogin} className="space-y-10 text-center">
+                                        <input type="password" name="p" className="w-full bg-black/80 border border-white/10 rounded-[2.5rem] px-10 py-6 text-center outline-none text-white font-black tracking-[1em] focus:border-indigo-600 transition-all shadow-inner text-2xl" placeholder="••••" value={passInput} onChange={e => setPassInput(e.target.value)} autoFocus />
+                                        <button className="w-full py-6 bg-white text-black rounded-[3rem] font-black uppercase shadow-2xl hover:bg-zinc-100 active:scale-95 transition-all text-sm tracking-[0.4em] shadow-white/5">Authorize Access</button>
+                                        <button type="button" onClick={() => setShowLogin(false)} className="text-[10px] font-black text-zinc-800 hover:text-white transition-all tracking-[0.6em] uppercase italic">Abort Entry</button>
+                                    </form>
+                                </div>
+                            </div>
+                        )}
+
+                        {showMasterConsole && <MasterConsoleModal />}
+                        {showAddMember && <AddMemberModal />}
+                    </div>
+
+                    {toast && <ToastComp msg={toast} onClose={() => setToast(null)} />}
+                </div>
+            );
+        }
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
